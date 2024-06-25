@@ -50,7 +50,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Using filter: {}", filter);
 
     // Set the filter
-    cap.filter(&filter).unwrap();
+    cap.filter(&filter)?;
 
     // Capture packets
     while let Ok(packet) = cap.next() {
