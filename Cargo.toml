@@ -1,0 +1,9 @@
+[package]
+name = "albion-chat-sniffer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+pcap = "0.8"
+netstat = "0.7.0"
+sysinfo = "0.30.12"
