@@ -28,20 +28,18 @@ fn list_ports() -> Result<Vec<u16>, Box<dyn std::error::Error>> {
     Ok(ports)
 }
 
-fn main() {
-    let ports = list_ports().unwrap();
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let ports = list_ports()?;
 
     // Get the default network device
-    let device = pcap::Device::lookup().unwrap();
+    let device = pcap::Device::lookup()?;
     println!("Using device: {}", device.name);
 
     // Create a Capture instance
-    let mut cap = pcap::Capture::from_device(device)
-        .unwrap()
+    let mut cap = pcap::Capture::from_device(device)?
         .promisc(true)
         .snaplen(u16::MAX as i32)
-        .open()
-        .unwrap();
+        .open()?;
 
     let filter: String = ports
         .iter()
@@ -58,4 +56,6 @@ fn main() {
     while let Ok(packet) = cap.next() {
         println!("Received packet: {:?}", packet);
     }
+
+    Ok(())
 }
