@@ -1,11 +1,11 @@
-fn list_ports() -> Result<Vec<u16>, Box<dyn std::error::Error>> {
+fn list_sockets() -> Result<Vec<netstat::UdpSocketInfo>, Box<dyn std::error::Error>> {
     let af_flags = netstat::AddressFamilyFlags::IPV4;
     let proto_flags = netstat::ProtocolFlags::UDP;
 
     let sockets_info = netstat::get_sockets_info(af_flags, proto_flags)?;
     let mut system = sysinfo::System::new_all();
     system.refresh_all();
-    let mut ports = Vec::new();
+    let mut sockets = Vec::new();
 
     for si in sockets_info {
         match si.protocol_socket_info {
@@ -16,7 +16,7 @@ fn list_ports() -> Result<Vec<u16>, Box<dyn std::error::Error>> {
                             || (process.name() == "Albion-Online.exe"
                                 && std::env::consts::OS == "windows")
                         {
-                            ports.push(udp_si.local_port);
+                            sockets.push(udp_si.clone());
                         }
                     }
                 }
@@ -25,11 +25,19 @@ fn list_ports() -> Result<Vec<u16>, Box<dyn std::error::Error>> {
         }
     }
 
-    Ok(ports)
+    Ok(sockets)
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let ports = list_ports()?;
+    let sockets = list_sockets()?;
+
+    let mut local_addrs = Vec::new();
+    let mut local_ports = Vec::new();
+
+    for socket in sockets {
+        local_addrs.push(socket.local_addr);
+        local_ports.push(socket.local_port);
+    }
 
     // Get the default network device
     let device = pcap::Device::lookup()?;
@@ -39,9 +47,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut cap = pcap::Capture::from_device(device)?
         .promisc(true)
         .snaplen(u16::MAX as i32)
+        .immediate_mode(true)
         .open()?;
 
-    let filter: String = ports
+    let filter: String = local_ports
         .iter()
         .map(|port| format!("udp port {}", port))
         .collect::<Vec<String>>()
@@ -78,9 +87,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if udp_payload_length > 0 {
             let udp_payload =
                 &packet[udp_payload_offset..udp_payload_offset + udp_payload_length as usize];
-            let payload_str = String::from_utf8_lossy(udp_payload);
+            // let payload_str = String::from_utf8_lossy(udp_payload);
+            let payload_str: String = udp_payload.iter().map(|&b| {
+                match b {
+                    // Alphanumeric characters and common symbols
+                    0x20..=0x7E => b as char,
+                    // Replace non-printable characters with '.'
+                    _ => '.',
+                }
+            }).collect();
 
-            println!("Source IP: {}, Source Port: {}, Destination IP: {}, Destination Port: {}, Payload: {:?}", source_ip, source_port, destination_ip, destination_port, payload_str);
+            if local_addrs.contains(&source_ip) {
+                println!("Sent to remote Port: [{}], Payload: [{}], Raw: [{:?}]", destination_port, payload_str, udp_payload);
+            }
+            else if local_addrs.contains(&destination_ip) {
+                println!("Received from remote port: [{}], Payload: [{}], Raw: [{:?}]", source_port, payload_str, udp_payload);
+
+            }
+            else {
+                panic!("We somehow intercepted a packet that should be outside the filter's scope");
+            }
         }
     }
 
