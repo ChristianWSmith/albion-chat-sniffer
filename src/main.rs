@@ -1,3 +1,10 @@
+#[macro_use]
+extern crate lazy_static;
+
+lazy_static! {
+    static ref RE: regex::Regex = regex::Regex::new(r"s\.\.([a-z0-9]*?)\.s\.\.(.*?)\.b").unwrap();
+}
+
 fn list_sockets() -> Result<Vec<netstat::UdpSocketInfo>, Box<dyn std::error::Error>> {
     let af_flags = netstat::AddressFamilyFlags::IPV4;
     let proto_flags = netstat::ProtocolFlags::UDP;
@@ -28,7 +35,18 @@ fn list_sockets() -> Result<Vec<netstat::UdpSocketInfo>, Box<dyn std::error::Err
     Ok(sockets)
 }
 
+fn process_payload(payload_str: &str, raw: &[u8]) {    
+    for caps in RE.captures_iter(payload_str) {
+        if let (Some(first_capture), Some(second_capture)) = (caps.get(1), caps.get(2)) {
+            if first_capture.as_str() != "System" {
+                println!("{}: {} ({:?})", first_capture.as_str(), second_capture.as_str(), raw);
+            }
+        }
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+
     let sockets = list_sockets()?;
 
     let mut local_addrs = Vec::new();
@@ -65,14 +83,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     while let Ok(packet) = cap.next() {
         let ip_header_length = (packet[14] & 0x0F) as usize * 4; // IP header length in bytes
         let udp_offset = 14 + ip_header_length; // Start of UDP header
-        let source_port = ((packet[udp_offset + 0] as u16) << 8) | (packet[udp_offset + 1] as u16);
-        let destination_port =
-            ((packet[udp_offset + 2] as u16) << 8) | (packet[udp_offset + 3] as u16);
-        let ip_header_length = (packet[14] & 0x0F) as usize * 4; // IP header length in bytes
-        let udp_offset = 14 + ip_header_length; // Start of UDP header
-        let source_ip = std::net::IpAddr::V4(std::net::Ipv4Addr::new(
-            packet[26], packet[27], packet[28], packet[29],
-        ));
+
         let destination_ip = std::net::IpAddr::V4(std::net::Ipv4Addr::new(
             packet[30], packet[31], packet[32], packet[33],
         ));
@@ -97,15 +108,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }).collect();
 
-            if local_addrs.contains(&source_ip) {
-                println!("Sent to remote Port: [{}], Payload: [{}], Raw: [{:?}]", destination_port, payload_str, udp_payload);
-            }
-            else if local_addrs.contains(&destination_ip) {
-                println!("Received from remote port: [{}], Payload: [{}], Raw: [{:?}]", source_port, payload_str, udp_payload);
-
-            }
-            else {
-                panic!("We somehow intercepted a packet that should be outside the filter's scope");
+            if local_addrs.contains(&destination_ip) {
+                process_payload(format!("{}", payload_str).as_str(), udp_payload);
             }
         }
     }
